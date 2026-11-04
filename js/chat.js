@@ -189,12 +189,39 @@
     return out;
   }
 
+  /**
+   * Extract image files from a paste event's clipboard items. Non-file and
+   * non-image items are ignored. Pasted images get a deterministic timestamped
+   * name, since clipboard-provided names are often empty or "image.png".
+   * @param {DataTransferItemList|Array} items
+   * @returns {File[]}
+   */
+  function imageFilesFromClipboardItems(items) {
+    const out = [];
+    let counter = 0;
+    const stamp = Date.now();
+    for (const item of Array.from(items || [])) {
+      if (!item || item.kind !== 'file') continue;
+      const type = (item.type || '').toLowerCase();
+      if (type.indexOf('image/') !== 0) continue;
+      let file = null;
+      try { file = item.getAsFile(); } catch (e) { file = null; }
+      if (!file) continue;
+      const ext = (type.split('/')[1] || 'png').replace(/^jpeg$/, 'jpg');
+      counter += 1;
+      const name = 'pasted-' + stamp + '-' + counter + '.' + ext;
+      out.push(new File([file], name, { type }));
+    }
+    return out;
+  }
+
   window.SophiaChat = {
     sendMessage,
     sendMessageWithFiles,
     loadHistory,
     parseSSE,
     detectAttachments,
+    imageFilesFromClipboardItems,
     sessionIdFor,
   };
 })();

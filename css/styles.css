@@ -58,6 +58,45 @@ html, body {
 .connect:hover { filter: brightness(1.1); }
 
 .auth-banner { padding: 8px; border-radius: 4px; font-size: 12px; word-break: break-word; }
+
+/* --- sidebar layout: actions row, collapse carets, drag & drop ------------ */
+.sidebar-actions { display: flex; gap: 6px; padding: 4px 8px 6px; }
+.sidebar-actions .new-channel { flex: 1 1 0; margin: 0; }
+.channel-list .category {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+.channel-list .category .caret {
+  display: inline-block;
+  width: 12px;
+  flex: 0 0 12px;
+  font-size: 10px;
+  opacity: 0.8;
+  transition: transform 0.12s ease;
+}
+.channel-list .category.collapsed .caret { transform: rotate(-90deg); }
+.channel-list .category .category-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.channel-list .category.dragging,
+.channel-list .channel.dragging { opacity: 0.45; }
+.channel-list .category.drop-target {
+  outline: 2px dashed var(--accent, #f0b429);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+.channel-list .channel.drop-before { box-shadow: inset 0 2px 0 0 var(--accent, #f0b429); }
+.channel-list .channel.drop-after { box-shadow: inset 0 -2px 0 0 var(--accent, #f0b429); }
+.channel-list .channel.hidden-collapsed { display: none; }
+details.msg-collapsed > summary {
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0.75;
+  margin-bottom: 4px;
+}
+details.msg-collapsed[open] > summary { margin-bottom: 6px; }
+
 .auth-banner.ok { background: #1b3a2a; color: #a3e6c0; }
 .auth-banner.error { background: #3a1b1b; color: #ffb3b3; }
 .auth-banner.info { background: #3a301b; color: #f0d29b; }

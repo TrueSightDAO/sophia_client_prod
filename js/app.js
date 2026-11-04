@@ -77,26 +77,180 @@
 
   // ---- channel list ----
 
+  let dragState = null;
+
+  function positionOf(ch) {
+    return (typeof ch._position === 'number') ? ch._position : Number.MAX_SAFE_INTEGER;
+  }
+
+  function channelsInCategory(name) {
+    return window.SophiaChannels.visibleChannels(config, currentRole)
+      .filter((c) => c.categoryName === name)
+      .sort((a, b) => positionOf(a) - positionOf(b));
+  }
+
+  function clearDropMarks() {
+    const sidebar = el('channelList');
+    if (!sidebar) return;
+    sidebar.querySelectorAll('.drop-target').forEach((n) => n.classList.remove('drop-target'));
+    sidebar.querySelectorAll('.drop-before, .drop-after').forEach((n) => {
+      n.classList.remove('drop-before');
+      n.classList.remove('drop-after');
+    });
+  }
+
   function renderChannelList() {
     const sidebar = el('channelList');
     sidebar.innerHTML = '';
+    const priv = isPrivileged(currentRole);
     const byCat = {};
     window.SophiaChannels.visibleChannels(config, currentRole).forEach((ch) => {
       (byCat[ch.categoryName] = byCat[ch.categoryName] || []).push(ch);
     });
+    Object.keys(byCat).forEach((k) => byCat[k].sort((a, b) => positionOf(a) - positionOf(b)));
     window.SophiaChannels.allCategories(config).forEach((catName) => {
+      const collapsed = window.SophiaChannels.isCollapsed(catName);
       const catHeader = document.createElement('div');
-      catHeader.className = 'category';
-      catHeader.textContent = catName;
+      catHeader.className = 'category' + (collapsed ? ' collapsed' : '');
+      catHeader.dataset.categoryName = catName;
+      const caret = document.createElement('span');
+      caret.className = 'caret';
+      caret.textContent = priv ? '\u25be' : '';
+      if (priv) {
+        caret.addEventListener('click', (e) => {
+          e.stopPropagation();
+          toggleCollapsed(catName);
+        });
+      }
+      catHeader.appendChild(caret);
+      const label = document.createElement('span');
+      label.className = 'category-label';
+      label.textContent = catName;
+      catHeader.appendChild(label);
       catHeader.addEventListener('contextmenu', (e) => onCategoryContextMenu(e, catName));
+      if (priv) wireCategoryDrag(catHeader, catName);
       sidebar.appendChild(catHeader);
       (byCat[catName] || []).forEach((ch) => {
-        sidebar.appendChild(buildChannelItem(ch));
+        const item = buildChannelItem(ch);
+        if (collapsed) item.classList.add('hidden-collapsed');
+        sidebar.appendChild(item);
       });
     });
-    const priv = isPrivileged(currentRole);
     el('newChannelBtn').hidden = !priv;
     el('newCategoryBtn').hidden = !priv;
+  }
+
+  // ---- collapse -----------------------------------------------------------
+  function toggleCollapsed(catName) {
+    const want = !window.SophiaChannels.isCollapsed(catName);
+    const before = window.SophiaChannels.getLayout();
+    const next = before.collapsed.filter((n) => n !== catName);
+    if (want) next.push(catName);
+    window.SophiaChannels.applyLocalCollapsed(next);
+    renderChannelList();
+    window.SophiaChannels.setCollapsed(catName, want, token).catch((err) => {
+      window.SophiaChannels.replaceLayout(before);
+      renderChannelList();
+      setAuthBanner('Collapse failed: ' + err.message, 'error');
+    });
+  }
+
+  // ---- drag & drop --------------------------------------------------------
+  function persistMove(channelId, categoryName, position, before) {
+    window.SophiaChannels.applyLocalMove(channelId, categoryName, position);
+    renderChannelList();
+    window.SophiaChannels.moveChannel(channelId, categoryName, position, token).catch((err) => {
+      window.SophiaChannels.replaceLayout(before);
+      renderChannelList();
+      setAuthBanner('Reorder failed: ' + err.message, 'error');
+    });
+  }
+
+  function wireChannelDrag(item, ch) {
+    item.draggable = true;
+    item.addEventListener('dragstart', (e) => {
+      dragState = { kind: 'channel', id: ch.id, categoryName: ch.categoryName };
+      item.classList.add('dragging');
+      try { e.dataTransfer.setData('text/plain', ch.id); } catch (err) { /* ignore */ }
+    });
+    item.addEventListener('dragend', () => {
+      item.classList.remove('dragging');
+      dragState = null;
+      clearDropMarks();
+    });
+    item.addEventListener('dragover', (e) => {
+      if (!dragState || dragState.kind !== 'channel') return;
+      e.preventDefault();
+      const rect = item.getBoundingClientRect();
+      const after = (e.clientY - rect.top) > (rect.height / 2);
+      item.classList.toggle('drop-after', after);
+      item.classList.toggle('drop-before', !after);
+    });
+    item.addEventListener('dragleave', () => {
+      item.classList.remove('drop-before');
+      item.classList.remove('drop-after');
+    });
+    item.addEventListener('drop', (e) => {
+      if (!dragState || dragState.kind !== 'channel') return;
+      e.preventDefault();
+      e.stopPropagation();
+      const after = item.classList.contains('drop-after');
+      const sourceId = dragState.id;
+      const targetCat = ch.categoryName;
+      clearDropMarks();
+      if (sourceId === ch.id) return;
+      const siblings = channelsInCategory(targetCat).filter((c) => c.id !== sourceId);
+      let idx = siblings.findIndex((c) => c.id === ch.id);
+      if (idx < 0) idx = siblings.length;
+      if (after) idx += 1;
+      persistMove(sourceId, targetCat, idx, window.SophiaChannels.getLayout());
+    });
+  }
+
+  function wireCategoryDrag(catHeader, catName) {
+    catHeader.draggable = true;
+    catHeader.addEventListener('dragstart', (e) => {
+      dragState = { kind: 'category', name: catName };
+      catHeader.classList.add('dragging');
+      try { e.dataTransfer.setData('text/plain', catName); } catch (err) { /* ignore */ }
+    });
+    catHeader.addEventListener('dragend', () => {
+      catHeader.classList.remove('dragging');
+      dragState = null;
+      clearDropMarks();
+    });
+    catHeader.addEventListener('dragover', (e) => {
+      if (!dragState) return;
+      e.preventDefault();
+      catHeader.classList.add('drop-target');
+    });
+    catHeader.addEventListener('dragleave', () => catHeader.classList.remove('drop-target'));
+    catHeader.addEventListener('drop', (e) => {
+      if (!dragState) return;
+      e.preventDefault();
+      e.stopPropagation();
+      catHeader.classList.remove('drop-target');
+      const before = window.SophiaChannels.getLayout();
+      if (dragState.kind === 'category') {
+        if (dragState.name === catName) { clearDropMarks(); return; }
+        const order = window.SophiaChannels.allCategories(config)
+          .filter((n) => n !== dragState.name);
+        const at = order.indexOf(catName);
+        order.splice(at < 0 ? order.length : at, 0, dragState.name);
+        window.SophiaChannels.applyLocalCategoryOrder(order);
+        renderChannelList();
+        window.SophiaChannels.setCategoryOrder(order, token).catch((err) => {
+          window.SophiaChannels.replaceLayout(before);
+          renderChannelList();
+          setAuthBanner('Reorder failed: ' + err.message, 'error');
+        });
+      } else {
+        // channel dropped onto a header -> move into that category (appended)
+        const count = channelsInCategory(catName).filter((c) => c.id !== dragState.id).length;
+        persistMove(dragState.id, catName, count, before);
+      }
+      clearDropMarks();
+    });
   }
 
   function buildChannelItem(ch) {
@@ -109,6 +263,7 @@
     item.appendChild(name);
     item.addEventListener('click', () => selectChannel(ch.id));
     item.addEventListener('contextmenu', (e) => onChannelContextMenu(e, ch));
+    if (isPrivileged(currentRole)) wireChannelDrag(item, ch);
 
     if (isPrivileged(currentRole)) {
       const retire = document.createElement('button');
@@ -315,7 +470,19 @@
     } else {
       content.innerHTML = renderContent(text);
     }
-    stack.appendChild(content);
+    if (who !== 'system' && text && text.length > 4000) {
+      // Long history bodies (e.g. server-truncated dumps) stay collapsible
+      // instead of blowing up the transcript.
+      const details = document.createElement('details');
+      details.className = 'msg-collapsed';
+      const summary = document.createElement('summary');
+      summary.textContent = 'Show full message (' + text.length + ' chars)';
+      details.appendChild(summary);
+      details.appendChild(content);
+      stack.appendChild(details);
+    } else {
+      stack.appendChild(content);
+    }
 
     if (who === 'sophia' && opts.reactive !== false) {
       stack.appendChild(buildReactionBar(text));
@@ -608,6 +775,16 @@
     updateAttachLabel();
   }
 
+  function onPaste(e) {
+    const cd = e.clipboardData || (window.clipboardData || null);
+    if (!cd || !cd.items) return;
+    const files = window.SophiaChat.imageFilesFromClipboardItems(cd.items);
+    if (!files.length) return;
+    e.preventDefault();
+    pendingFiles = pendingFiles.concat(files);
+    updateAttachLabel();
+  }
+
   async function boot() {
     try {
       config = await loadConfig();
@@ -631,8 +808,16 @@
     el('attachBtn').addEventListener('click', () => el('fileInput').click());
     el('fileInput').addEventListener('change', onFilesChosen);
     el('messageInput').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); onSend(); }
+      if (e.key !== 'Enter') return;
+      if (e.isComposing || e.keyCode === 229) return; // IME: never send mid-composition
+      if (e.ctrlKey || e.metaKey) { e.preventDefault(); onSend(); return; } // always-send
+      const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+      if (coarse) return; // soft keyboards have no Shift -> Enter is a newline
+      if (e.shiftKey) return; // Shift+Enter -> break line
+      e.preventDefault();
+      onSend();
     });
+    el('messageInput').addEventListener('paste', onPaste);
     el('messageInput').addEventListener('input', autoResizeTextarea);
     el('newChannelBtn').addEventListener('click', openNewChannelModal);
     el('channelCreateBtn').addEventListener('click', onCreateChannel);

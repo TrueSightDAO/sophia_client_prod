@@ -17,9 +17,11 @@
       </div>
       <div class="auth-banner" id="authBanner" hidden></div>
       <button id="connectBtn" class="connect">Connect identity</button>
+      <div class="sidebar-actions">
+        <button id="newChannelBtn" class="new-channel" hidden>+ Channel</button>
+        <button id="newCategoryBtn" class="new-channel" hidden>+ Category</button>
+      </div>
       <div id="channelList" class="channel-list"></div>
-      <button id="newChannelBtn" class="new-channel" hidden>+ Channel</button>
-      <button id="newCategoryBtn" class="new-channel" hidden>+ Category</button>
       <div id="identity" class="identity"></div>
       <button id="linkIdentityBtn" class="link-identity" hidden>Link to DAO identity</button>
       <div id="identityStatus" class="identity-status" hidden></div>
@@ -31,7 +33,7 @@
       <div id="messages" class="messages"></div>
       <div id="composer" class="composer" hidden>
         <button id="attachBtn" class="attach" title="Attach files">📎</button>
-        <textarea id="messageInput" rows="1" placeholder="Message Sophia… (Ctrl+Enter to send)"></textarea>
+        <textarea id="messageInput" rows="1" placeholder="Message Sophia… (Enter to send · Shift+Enter for a new line)"></textarea>
         <button id="sendBtn" class="send">Send</button>
         <input type="file" id="fileInput" multiple hidden />
       </div>

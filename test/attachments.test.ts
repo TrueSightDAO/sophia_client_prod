@@ -45,6 +45,39 @@ describe('detectAttachments', () => {
   });
 });
 
+describe('imageFilesFromClipboardItems', () => {
+  const mkItem = (kind: string, type: string, file: File | null) => ({
+    kind,
+    type,
+    getAsFile: () => file,
+  });
+
+  it('extracts image items and gives them timestamped names', () => {
+    const png = new File(['x'], 'image.png', { type: 'image/png' });
+    const items = [
+      mkItem('string', 'text/plain', null),
+      mkItem('file', 'image/png', png),
+      mkItem('file', 'application/pdf', new File(['p'], 'a.pdf', { type: 'application/pdf' })),
+    ];
+    const files = Chat.imageFilesFromClipboardItems(items);
+    expect(files).toHaveLength(1);
+    expect(files[0].type).toBe('image/png');
+    expect(files[0].name).toMatch(/^pasted-\d+-\d+\.png$/);
+  });
+
+  it('normalizes jpeg to .jpg', () => {
+    const jpg = new File(['y'], 'image.jpeg', { type: 'image/jpeg' });
+    const files = Chat.imageFilesFromClipboardItems([mkItem('file', 'image/jpeg', jpg)]);
+    expect(files).toHaveLength(1);
+    expect(files[0].name).toMatch(/\.jpg$/);
+  });
+
+  it('returns [] when no image items are present', () => {
+    expect(Chat.imageFilesFromClipboardItems([])).toEqual([]);
+    expect(Chat.imageFilesFromClipboardItems([mkItem('string', 'text/plain', null)])).toEqual([]);
+  });
+});
+
 describe('signMessage payload shape', () => {
   it('builds {message,timestamp,nonce,do_not_publish} and a base64 signature', async () => {
     const { body, publicKey } = await Auth.signMessage('hello', false);

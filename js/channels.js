@@ -19,7 +19,7 @@
   const LS_CATEGORIES = 'sophia_categories_created';
 
   // In-memory cache of the shared registry (loaded from the server).
-  let registry = { channels: [], categories: [], retired: [] };
+  let registry = { channels: [], categories: [], retired: [], layout: emptyLayout() };
 
   function baseUrl() {
     const cfg = window.AppConfig || {};
@@ -59,6 +59,7 @@
           channels: (d.channels || []).map((c) => Object.assign({}, c, { created: true })),
           categories: d.categories || [],
           retired: d.retired || [],
+          layout: normalizeLayout(d.layout),
         };
         return registry;
       }
@@ -67,6 +68,7 @@
       channels: _lsGet(LS_CREATED).map((c) => Object.assign({}, c, { created: true })),
       categories: _lsGet(LS_CATEGORIES),
       retired: _lsGet(LS_RETIRED),
+      layout: emptyLayout(),
     };
     return registry;
   }
@@ -74,14 +76,28 @@
   function allCategories(config) {
     const built = (config.categories || []).map((c) => c.name);
     const created = registry.categories.filter((n) => built.indexOf(n) === -1);
-    return built.concat(created);
+    const merged = built.concat(created);
+    const order = layout().category_order;
+    const known = merged
+      .filter((n) => order.indexOf(n) !== -1)
+      .sort((a, b) => order.indexOf(a) - order.indexOf(b));
+    const unknown = merged.filter((n) => order.indexOf(n) === -1);
+    return known.concat(unknown);
   }
 
   function allChannels(config) {
     const retired = new Set(registry.retired);
     const built = flattenChannels(config).filter((c) => !retired.has(c.id));
     const created = registry.channels.filter((c) => !retired.has(c.id));
-    return built.concat(created);
+    const overlay = layout().channels;
+    return built.concat(created).map((c) => {
+      const placement = overlay[c.id];
+      if (!placement) return c;
+      const next = Object.assign({}, c);
+      if (placement.category_name) next.categoryName = placement.category_name;
+      if (typeof placement.position === 'number') next._position = placement.position;
+      return next;
+    });
   }
 
   function visibleChannels(config, role) {
@@ -169,6 +185,109 @@
     registry.channels = registry.channels.filter((c) => c.categoryName !== name);
   }
 
+  // ---------------------------------------------------------------- layout
+  // Placement overlay over config.json. Built-in channels/categories are
+  // immutable at runtime, so order/category/collapse is stored server-side as
+  // an overlay (PUT /layout) and merged in here on read.
+
+  function emptyLayout() {
+    return { category_order: [], channels: {}, collapsed: [] };
+  }
+
+  function _cleanNames(list) {
+    return (list || []).filter((n) => typeof n === 'string' && n.trim());
+  }
+
+  function normalizeLayout(raw) {
+    const out = emptyLayout();
+    if (!raw || typeof raw !== 'object') return out;
+    if (Array.isArray(raw.category_order)) out.category_order = _cleanNames(raw.category_order);
+    if (Array.isArray(raw.collapsed)) out.collapsed = _cleanNames(raw.collapsed);
+    if (raw.channels && typeof raw.channels === 'object') {
+      Object.keys(raw.channels).forEach((id) => {
+        const p = raw.channels[id];
+        if (!p || typeof p !== 'object') return;
+        const clean = {};
+        if (typeof p.category_name === 'string' && p.category_name.trim()) {
+          clean.category_name = p.category_name.trim();
+        }
+        if (typeof p.position === 'number' && isFinite(p.position)) {
+          clean.position = Math.max(0, Math.trunc(p.position));
+        }
+        if (Object.keys(clean).length) out.channels[id] = clean;
+      });
+    }
+    return out;
+  }
+
+  function layout() {
+    return registry.layout || emptyLayout();
+  }
+
+  function getLayout() {
+    return normalizeLayout(layout());
+  }
+
+  function replaceLayout(next) {
+    registry.layout = normalizeLayout(next);
+    return registry.layout;
+  }
+
+  function applyLocalCollapsed(names) {
+    const l = getLayout();
+    l.collapsed = _cleanNames(names);
+    return replaceLayout(l);
+  }
+
+  function applyLocalCategoryOrder(names) {
+    const l = getLayout();
+    l.category_order = _cleanNames(names);
+    return replaceLayout(l);
+  }
+
+  function applyLocalMove(channelId, categoryName, position) {
+    const l = getLayout();
+    const placement = l.channels[channelId] || {};
+    if (typeof categoryName === 'string' && categoryName.trim()) {
+      placement.category_name = categoryName.trim();
+    }
+    if (typeof position === 'number' && isFinite(position)) {
+      placement.position = Math.max(0, Math.trunc(position));
+    }
+    l.channels[channelId] = placement;
+    return replaceLayout(l);
+  }
+
+  function isCollapsed(categoryName) {
+    return layout().collapsed.indexOf(categoryName) !== -1;
+  }
+
+  async function _putLayout(payload, token) {
+    // Server accepts a partial payload and returns the merged layout.
+    return replaceLayout(await _req('PUT', '/layout', payload, token));
+  }
+
+  async function setCollapsed(categoryName, collapsed, token) {
+    const next = layout().collapsed.filter((n) => n !== categoryName);
+    if (collapsed) next.push(categoryName);
+    return _putLayout({ collapsed: next }, token);
+  }
+
+  async function setCategoryOrder(names, token) {
+    return _putLayout({ category_order: _cleanNames(names) }, token);
+  }
+
+  async function moveChannel(channelId, categoryName, position, token) {
+    const move = { channel_id: channelId };
+    if (typeof categoryName === 'string' && categoryName.trim()) {
+      move.category_name = categoryName.trim();
+    }
+    if (typeof position === 'number' && isFinite(position)) {
+      move.position = Math.max(0, Math.trunc(position));
+    }
+    return _putLayout({ move }, token);
+  }
+
   window.SophiaChannels = {
     loadRegistry,
     flattenChannels,
@@ -185,5 +304,14 @@
     isBuiltinChannel,
     isBuiltinCategory,
     isRetired,
+    getLayout,
+    replaceLayout,
+    applyLocalCollapsed,
+    applyLocalCategoryOrder,
+    applyLocalMove,
+    isCollapsed,
+    setCollapsed,
+    setCategoryOrder,
+    moveChannel,
   };
 })();
